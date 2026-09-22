@@ -49,6 +49,12 @@ def test_app_containers_use_compose_internal_service_addresses() -> None:
     assert environment["EDR_KAFKA_PARTITIONS_PER_TOPIC"] == "${EDR_KAFKA_PARTITIONS_PER_TOPIC:-2}"
 
 
+def test_kafka_log_directory_matches_persistent_volume_in_every_stack() -> None:
+    for path in ("compose.yaml", "compose.prod.yaml", "deploy/portainer/compose.infra.yaml"):
+        kafka = yaml.safe_load((ROOT / path).read_text(encoding="utf-8"))["services"]["kafka"]
+        assert kafka["volumes"] == [f'kafka-data:{kafka["environment"]["KAFKA_LOG_DIRS"]}']
+
+
 def test_local_init_permissions_are_scoped_to_bootstrap_services() -> None:
     services = _compose()["services"]
     cert_init = services["cert-init"]
