@@ -1,0 +1,66 @@
+logging {
+  level = "info"
+}
+
+prometheus.remote_write "local" {
+  external_labels = {
+    environment = "local",
+  }
+
+  endpoint {
+    url = "http://prometheus:9090/api/v1/write"
+  }
+}
+
+prometheus.exporter.kafka "local" {
+  kafka_uris                = ["kafka:29092"]
+  allow_auto_topic_creation = false
+  allow_concurrency         = false
+  offset_show_all           = true
+}
+
+prometheus.scrape "kafka" {
+  targets         = prometheus.exporter.kafka.local.targets
+  forward_to      = [prometheus.remote_write.local.receiver]
+  job_name        = "kafka_exporter"
+  scrape_interval = "5s"
+  scrape_timeout  = "4s"
+}
+
+discovery.docker "local" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "10s"
+}
+
+discovery.relabel "local_logs" {
+  targets = discovery.docker.local.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = "edr-c-local"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "compose_project"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "compose_service"
+  }
+}
+
+loki.source.docker "local" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.local_logs.output
+  labels     = { environment = "local", job = "docker" }
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

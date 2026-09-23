@@ -23,6 +23,7 @@ COPY backend ./backend
 COPY tools/__init__.py \
     tools/check_worker_health.py \
     tools/create_admin.py \
+    tools/export_observability_metrics.py \
     tools/local_demo.py \
     tools/manage_admin.py \
     tools/prod_init.py \

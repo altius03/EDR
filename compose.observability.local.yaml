@@ -1,0 +1,117 @@
+services:
+  clickhouse:
+    volumes:
+      - ./deploy/observability/local/clickhouse-prometheus.xml:/etc/clickhouse-server/config.d/prometheus.xml:ro
+
+  prometheus:
+    image: prom/prometheus:v3.14.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-remote-write-receiver
+    volumes:
+      - ./deploy/observability/local/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - data
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.7.8
+    command: ["-config.file=/etc/loki/local.yaml"]
+    volumes:
+      - ./deploy/observability/local/loki.yaml:/etc/loki/local.yaml:ro
+      - loki-data:/loki
+    networks:
+      - data
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:13.2.2
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    ports:
+      - "127.0.0.1:${GRAFANA_HOST_PORT:-33000}:3000"
+    volumes:
+      - ./deploy/observability/local/datasources.yaml:/etc/grafana/provisioning/datasources/local.yaml:ro
+      - ./deploy/observability/local/dashboards.yaml:/etc/grafana/provisioning/dashboards/local.yaml:ro
+      - ./deploy/observability/local/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+    networks:
+      - data
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:v1.19.2
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - --disable-reporting
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./deploy/observability/local/config.alloy:/etc/alloy/config.alloy:ro
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        read_only: true
+      - alloy-data:/var/lib/alloy/data
+    depends_on:
+      kafka:
+        condition: service_healthy
+      prometheus:
+        condition: service_started
+      loki:
+        condition: service_started
+    networks:
+      - data
+    restart: unless-stopped
+
+  kminion:
+    image: redpandadata/kminion:v2.3.1
+    environment:
+      KAFKA_BROKERS: kafka:29092
+      MINION_CONSUMERGROUPS_SCRAPEMODE: offsetsTopic
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
+  metrics-snapshot:
+    build:
+      context: .
+      dockerfile: deploy/docker/backend.Dockerfile
+    command: ["python", "-m", "tools.export_observability_metrics"]
+    environment:
+      EDR_POSTGRES_DSN: postgresql://${POSTGRES_USER:-edr}:${POSTGRES_PASSWORD:-edr-local-postgres}@postgres:5432/${POSTGRES_DB:-edr}
+      EDR_CLICKHOUSE_DSN: http://${CLICKHOUSE_USER:-edr}:${CLICKHOUSE_PASSWORD:-edr-local-clickhouse}@clickhouse:8123/${CLICKHOUSE_DB:-edr}
+    depends_on:
+      app-init:
+        condition: service_completed_successfully
+    networks:
+      - data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  loki-data:
+  grafana-data:
+  alloy-data:

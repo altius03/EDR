@@ -1,0 +1,206 @@
+{
+  "uid": "edr-local-reproduction",
+  "title": "EDR 이벤트 처리 현황",
+  "tags": ["edr", "local", "reproduction"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-1h", "to": "now"},
+  "panels": [
+    {"id": 1, "type": "row", "title": "핵심 지표", "collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0}},
+    {
+      "id": 2, "type": "stat", "title": "Storage Worker Consumer Lag",
+      "description": "KMinion consumer group/topic lag. 시계열이 없으면 0이 아니라 수집 또는 커밋 미확인 상태입니다.",
+      "datasource": {"type": "prometheus", "uid": "local-prometheus"},
+      "targets": [{"expr": "sum(kminion_kafka_consumer_group_topic_lag{group_id=\"edr-event-storage-v1\",topic_name=\"telemetry.raw\"})", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short", "noValue": "No data"}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 1}
+    },
+    {
+      "id": 3, "type": "stat", "title": "Storage Worker Offset Commit Rate",
+      "description": "KMinion offsetsTopic 모드. 유입이 없을 때 0은 장애 근거가 아닙니다.",
+      "datasource": {"type": "prometheus", "uid": "local-prometheus"},
+      "targets": [{"expr": "sum(rate(kminion_kafka_consumer_group_offset_commits_total{group_id=\"edr-event-storage-v1\"}[5m]))", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "ops", "noValue": "No data"}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "gridPos": {"h": 5, "w": 6, "x": 6, "y": 1}
+    },
+    {
+      "id": 4, "type": "stat", "title": "ClickHouse 저장 이벤트 수",
+      "description": "edr_events의 비삭제 distinct event_id 스냅샷. 누적 counter가 아니며 archive/delete로 감소할 수 있습니다.",
+      "datasource": {"type": "prometheus", "uid": "local-prometheus"},
+      "targets": [{"expr": "edr_events_stored_current", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short", "noValue": "No data"}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "gridPos": {"h": 5, "w": 6, "x": 12, "y": 1}
+    },
+    {
+      "id": 5, "type": "stat", "title": "PostgreSQL Alert 수",
+      "description": "비삭제 alerts 행 수 스냅샷. 모든 저장 이벤트가 Alert 대상은 아니므로 두 수의 차이는 누락 수가 아닙니다.",
+      "datasource": {"type": "prometheus", "uid": "local-prometheus"},
+      "targets": [{"expr": "edr_alerts_current", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short", "noValue": "No data"}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "gridPos": {"h": 5, "w": 6, "x": 18, "y": 1}
+    },
+    {"id": 6, "type": "row", "title": "Kafka 처리 현황", "collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 6}},
+    {
+      "id": 7, "type": "timeseries", "title": "Consumer Lag (그룹·토픽별)",
+      "datasource": {"type": "prometheus", "uid": "local-prometheus"},
+      "targets": [{"expr": "sum by (group_id, topic_name) (kminion_kafka_consumer_group_topic_lag{topic_name=~\"telemetry.raw|telemetry.validated\"})", "legendFormat": "{{group_id}} / {{topic_name}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 7}
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "Offset Commit Rate (그룹별)",
+      "datasource": {"type": "prometheus", "uid": "local-prometheus"},
+      "targets": [{"expr": "sum by (group_id) (rate(kminion_kafka_consumer_group_offset_commits_total{group_id=~\"edr-.*\"}[5m]))", "legendFormat": "{{group_id}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 7}
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "telemetry.raw 유입·커밋 속도",
+      "description": "High watermark와 committed offset의 5분 기울기입니다. 재처리·retention·offset reset 시 실제 처리량과 다를 수 있습니다.",
+      "datasource": {"type": "prometheus", "uid": "local-prometheus"},
+      "targets": [
+        {"expr": "clamp_min(deriv(kminion_kafka_topic_high_water_mark_sum{topic_name=\"telemetry.raw\"}[5m]), 0)", "legendFormat": "Incoming", "refId": "A"},
+        {"expr": "clamp_min(deriv(kminion_kafka_consumer_group_topic_offset_sum{group_id=\"edr-event-storage-v1\",topic_name=\"telemetry.raw\"}[5m]), 0)", "legendFormat": "Storage consumed", "refId": "B"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 15}
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "Consumer Lag (교차 확인)",
+      "datasource": {"type": "prometheus", "uid": "local-prometheus"},
+      "targets": [{"expr": "sum by (consumergroup, topic) (kafka_consumergroup_lag{topic=~\"telemetry.raw|telemetry.validated\"})", "legendFormat": "{{consumergroup}} / {{topic}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 15}
+    },
+    {
+      "id": 11, "type": "timeseries", "title": "Latest Offset (파티션별)",
+      "datasource": {"type": "prometheus", "uid": "local-prometheus"},
+      "targets": [{"expr": "kafka_topic_partition_current_offset{topic=~\"telemetry.raw|telemetry.validated\"}", "legendFormat": "{{topic}} / p{{partition}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 23}
+    },
+    {
+      "id": 12, "type": "timeseries", "title": "Oldest Offset (파티션별)",
+      "description": "Retention 경계 확인용 kafka_topic_partition_oldest_offset.",
+      "datasource": {"type": "prometheus", "uid": "local-prometheus"},
+      "targets": [{"expr": "kafka_topic_partition_oldest_offset{topic=~\"telemetry.raw|telemetry.validated\"}", "legendFormat": "{{topic}} / p{{partition}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 23}
+    },
+    {
+      "id": 13, "type": "timeseries", "title": "Partition 수 (토픽별)",
+      "datasource": {"type": "prometheus", "uid": "local-prometheus"},
+      "targets": [{"expr": "count by (topic) (kafka_topic_partition_current_offset{topic=~\"telemetry.raw|telemetry.validated\"})", "legendFormat": "{{topic}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 31}
+    },
+    {"id": 14, "type": "row", "title": "ClickHouse·Worker 상태", "collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 37}},
+    {
+      "id": 15, "type": "timeseries", "title": "ClickHouse Query Rate",
+      "datasource": {"type": "prometheus", "uid": "local-prometheus"},
+      "targets": [
+        {"expr": "rate(ClickHouseProfileEvents_Query[5m])", "legendFormat": "Queries", "refId": "A"},
+        {"expr": "rate(ClickHouseProfileEvents_SelectQuery[5m])", "legendFormat": "SELECT", "refId": "B"},
+        {"expr": "rate(ClickHouseProfileEvents_InsertQuery[5m])", "legendFormat": "INSERT", "refId": "C"},
+        {"expr": "rate(ClickHouseProfileEvents_FailedSelectQuery[5m])", "legendFormat": "Failed SELECT", "refId": "D"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 16, "x": 0, "y": 38}
+    },
+    {
+      "id": 16, "type": "timeseries", "title": "ClickHouse 재시작 감지 (1시간)",
+      "description": "Uptime 감소 횟수(1h). 수집 공백 중 재시작은 놓칠 수 있습니다.",
+      "datasource": {"type": "prometheus", "uid": "local-prometheus"},
+      "targets": [{"expr": "resets(ClickHouseAsyncMetrics_Uptime[1h])", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 38}
+    },
+    {
+      "id": 17, "type": "timeseries", "title": "Worker 처리 실패 로그 (5분)",
+      "datasource": {"type": "loki", "uid": "local-loki"},
+      "targets": [{"expr": "sum by (compose_service) (count_over_time({compose_project=\"edr-c-local\",compose_service=~\"event-storage-worker|detection-worker\"} |= \"worker message failed\" [5m]))", "legendFormat": "{{compose_service}}", "queryType": "range", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 46}
+    },
+    {
+      "id": 18, "type": "timeseries", "title": "재처리 상태별 실패 이벤트 수",
+      "description": "ClickHouse event_failures FINAL의 상태별 현재 건수. 실패가 없으면 0입니다.",
+      "datasource": {"type": "prometheus", "uid": "local-prometheus"},
+      "targets": [{"expr": "edr_failures_current", "legendFormat": "{{status}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 46}
+    },
+    {
+      "id": 19, "type": "text", "title": "검증 기준 및 Alert 설정",
+      "options": {"mode": "markdown", "content": "**ID 대조는 수동 검증**: `edr_events.event_id`와 `telemetry.validated` 메시지의 ID를 대조하고, `telemetry.raw` offset 재처리 여부를 함께 확인합니다. 저장 건수와 Alert 건수의 단순 차이는 누락이 아닙니다.\n\n노션의 `owlby_events_unpublished_total`, `owlby_events_stored_total`, `owlby_alerts_created_total`는 아직 계측되지 않았습니다. 원장의 published offset도 현재 스키마에 없습니다. 따라서 미발행 > 0, commit rate = 0, lag > 10000, 저장 증가·Alert 정지의 **4개 알림은 자동 발화하도록 등록하지 않았습니다**. 실험 입력이 실제로 들어오고 탐지 규칙에 맞는 이벤트임을 확인한 뒤 알림을 켜야 오탐을 피할 수 있습니다.\n\n컨테이너 health는 `docker compose ... ps`에서 확인합니다. 아래 `up`은 exporter scrape 성공만 의미합니다."},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 54}
+    },
+    {"id": 20, "type": "row", "title": "서비스 운영 지표", "collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 62}},
+    {
+      "id": 21, "type": "timeseries", "title": "최근 15분 저장 이벤트·Alert",
+      "description": "서로 다른 집합의 현재 15분 창 건수입니다. 규칙 매칭 이벤트로 필터링하지 않았으므로 이 차이를 누락으로 해석하지 마세요.",
+      "datasource": {"type": "prometheus", "uid": "local-prometheus"},
+      "targets": [
+        {"expr": "edr_events_stored_15m", "legendFormat": "stored event_id", "refId": "A"},
+        {"expr": "edr_alerts_created_15m", "legendFormat": "created alerts", "refId": "B"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 63}
+    },
+    {
+      "id": 22, "type": "timeseries", "title": "Endpoint 상태별 수",
+      "datasource": {"type": "prometheus", "uid": "local-prometheus"},
+      "targets": [{"expr": "edr_endpoints_current", "legendFormat": "{{status}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 63}
+    },
+    {
+      "id": 23, "type": "timeseries", "title": "Rollup 갱신 경과 시간",
+      "datasource": {"type": "prometheus", "uid": "local-prometheus"},
+      "targets": [{"expr": "edr_rollup_freshness_seconds", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 71}
+    },
+    {
+      "id": 24, "type": "timeseries", "title": "Archive/Restore 버킷 상태별 수",
+      "datasource": {"type": "prometheus", "uid": "local-prometheus"},
+      "targets": [{"expr": "edr_archive_buckets_current", "legendFormat": "{{status}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 71}
+    },
+    {
+      "id": 25, "type": "timeseries", "title": "Open Incident 수",
+      "datasource": {"type": "prometheus", "uid": "local-prometheus"},
+      "targets": [{"expr": "edr_incidents_open_current", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 71}
+    },
+    {
+      "id": 26, "type": "timeseries", "title": "Prometheus Scrape 상태",
+      "description": "컨테이너 health가 아닌 Prometheus scrape 가용성입니다.",
+      "datasource": {"type": "prometheus", "uid": "local-prometheus"},
+      "targets": [{"expr": "up{job=~\"prometheus|kminion|clickhouse|edr_snapshot|integrations/kafka\"}", "legendFormat": "{{job}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0, "max": 1}, "overrides": []},
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 79}
+    },
+    {
+      "id": 27, "type": "logs", "title": "Storage·Detection Worker 로그",
+      "datasource": {"type": "loki", "uid": "local-loki"},
+      "targets": [{"expr": "{compose_project=\"edr-c-local\",compose_service=~\"event-storage-worker|detection-worker\"}", "queryType": "range", "refId": "A"}],
+      "options": {"showTime": true, "showLabels": false, "wrapLogMessage": true, "sortOrder": "Descending"},
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 79}
+    },
+    {"id": 28, "type": "row", "title": "미계측 지표", "collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 86}},
+    {
+      "id": 29, "type": "text", "title": "추가 계측 항목",
+      "options": {"mode": "markdown", "content": "이 저장소에는 아직 아래 시계열의 실제 계측 지점이 없습니다. 패널에 허구의 수치를 넣지 않고 후속 구현 대상으로 둡니다.\n\n- **Agent/Collector:** heartbeat age, 센서·이벤트 유형별 유입, 인증서 만료/거부, 버전, 요청·수락·거절·Kafka ACK, 요청 지연, mTLS 실패.\n- **파이프라인:** 단계별 event_id 완전성, duplicate/재시도/재발행, 실패 sink, 규칙 평가·매칭, Alert 생성 지연과 backlog.\n- **조회/보관:** rollup coverage/불일치, LIVE 429·503, archive checksum/복구 성공률.\n- **실험:** k6 요청량·오류율·p95, 부하 구간 태깅, 규칙 매칭 event_id↔Alert 대조.\n\n상단의 저장·Alert 스냅샷은 **다른 모집단**입니다. 실제 누락 판정에는 규칙에 매칭되는 `event_id`와 `(event_id, rule_code, rule_version)` Alert 키를 대조해야 합니다."},
+      "gridPos": {"h": 9, "w": 24, "x": 0, "y": 87}
+    }
+  ]
+}
