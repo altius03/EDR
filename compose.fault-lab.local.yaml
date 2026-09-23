@@ -1,0 +1,9 @@
+# Apply only with compose.yaml for the isolated local failure experiment.
+services:
+  event-storage-worker:
+    command: ["python", "/app/storage_fault_lab.py"]
+    environment:
+      EDR_LOCAL_FAULT_EXPERIMENT: "1"
+      EDR_EXPERIMENT_MODE: ${EDR_EXPERIMENT_MODE:?Set broken or fixed for the local fault lab}
+    volumes:
+      - ./tests/load/storage_fault_lab.py:/app/storage_fault_lab.py:ro
