@@ -29,6 +29,7 @@ COPY tools/__init__.py \
     tools/provision_agent_cert.py \
     tools/provision_compose_certs.py \
     tools/replay_failure.py \
+    tools/run_dashboard_rollup_worker.py \
     tools/run_detection_worker.py \
     tools/run_event_storage_worker.py \
     tools/run_storage_lifecycle_worker.py \
